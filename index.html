@@ -187,6 +187,21 @@
     </div>
   </div>
 
+  <!-- 无匹配 → 放宽确认弹窗 -->
+  <div class="overlay" id="relaxOverlay">
+    <div class="panel">
+      <div class="panel-head"><span>没有符合条件的食物</span><button class="x" data-act="closeRelax">X</button></div>
+      <div class="panel-body">
+        <div class="warn">⚠️ 按当前条件（时段 / 轻食 / 场景 / 想吃 / 不想吃 / 忌口）没有找到任何食物。</div>
+        <div class="data-hint">可「返回修改」调整条件；或「放宽再抽」，由系统依次放宽：想吃 → 轻食/场景 → 不想吃 → 忌口。</div>
+        <div class="actions">
+          <button class="btn ghost" data-act="backToEditFromRelax">返回修改</button>
+          <button class="btn primary" data-act="relaxAndDraw">放宽再抽</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
 <script src="./foods.js"></script>

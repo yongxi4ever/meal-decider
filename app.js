@@ -47,6 +47,7 @@
   var newFoodTags = [];
   var newFoodMeals = [];
   var lastResult = null;
+  var lastRelax = 0;
   var toastTimer = null;
   var avoidFromPrefs = false;
 
@@ -140,7 +141,6 @@
     });
     return { want: want, avoid: avoid };
   }
-  function hasAny(o) { return Object.keys(o).length > 0; }
   function lightLabel(k) {
     for (var i = 0; i < LIGHTS.length; i++) { if (LIGHTS[i].k === k) return LIGHTS[i].t; }
     return '';
@@ -198,24 +198,23 @@
     setTimeout(function () { $('prefOverlay').classList.add('show'); }, 120);
   }
 
-  /* ---------- 抽选 ---------- */
+  /* ---------- 抽选（全部为条件过滤，无权重） ---------- */
   function buildPool(relax) {
     var pref = getPrefSets();
     var want = pref.want, avoid = pref.avoid;
     var pool = FOODS.filter(function (f) { return f.meal.indexOf(state.meal) !== -1; });
     pool = pool.filter(function (f) { return !tempExclude[f.id]; });
-    if (relax < 3) {
+
+    // ④ 忌口（最后放宽）
+    if (relax < 4) {
       var active = AVOIDS.filter(function (a) { return avoidSet.indexOf(a.k) !== -1; });
       pool = pool.filter(function (f) {
         for (var i = 0; i < active.length; i++) { if (active[i].match(f)) return false; }
         return true;
       });
     }
-    if (relax < 2) {
-      if (state.light === 'need') pool = pool.filter(function (f) { return (f.tags.meat || []).indexOf('轻食') !== -1; });
-      if (state.light === 'no') pool = pool.filter(function (f) { return (f.tags.meat || []).indexOf('轻食') === -1; });
-    }
-    if (relax < 1) {
+    // ③ 不想吃
+    if (relax < 3) {
       pool = pool.filter(function (f) {
         for (var g in avoid) {
           var arr = f.tags[g] || [];
@@ -223,6 +222,11 @@
         }
         return true;
       });
+    }
+    // ② 轻食需求 + 场景默认
+    if (relax < 2) {
+      if (state.light === 'need') pool = pool.filter(function (f) { return (f.tags.meat || []).indexOf('轻食') !== -1; });
+      if (state.light === 'no') pool = pool.filter(function (f) { return (f.tags.meat || []).indexOf('轻食') === -1; });
       var scenePicked = (want.scene && want.scene.length) || (avoid.scene && avoid.scene.length);
       if (!scenePicked) {
         pool = pool.filter(function (f) {
@@ -230,43 +234,54 @@
         });
       }
     }
-    return { pool: pool, want: want };
+    // ① 想吃（条件：每个已选维度都要命中，同维度内任一即可）
+    if (relax < 1) {
+      pool = pool.filter(function (f) {
+        for (var g in want) {
+          var arr = f.tags[g] || [];
+          var ok = false;
+          for (var i = 0; i < arr.length; i++) { if (want[g].indexOf(arr[i]) !== -1) { ok = true; break; } }
+          if (!ok) return false;
+        }
+        return true;
+      });
+    }
+    return { pool: pool };
   }
   function pick() {
     var relax = 0, res = null;
-    while (relax <= 3) { res = buildPool(relax); if (res.pool.length) break; relax++; }
-    var pool = res.pool, want = res.want;
-    if (!pool.length) return null;
-    if (relax > 0) toast('偏好太严格，已自动放宽条件');
-    if (!hasAny(want)) return pool[Math.floor(Math.random() * pool.length)];
-    var weights = pool.map(function (f) {
-      var hits = 0;
-      for (var g in want) {
-        var arr = f.tags[g] || [];
-        for (var i = 0; i < arr.length; i++) { if (want[g].indexOf(arr[i]) !== -1) { hits++; break; } }
-      }
-      return 1 + 2 * hits;
-    });
-    var total = weights.reduce(function (a, b) { return a + b; }, 0);
-    var r = Math.random() * total;
-    for (var i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
-    return pool[pool.length - 1];
+    while (relax <= 4) { res = buildPool(relax); if (res.pool.length) break; relax++; }
+    lastRelax = relax;
+    if (!res.pool.length) return null;
+    return res.pool[Math.floor(Math.random() * res.pool.length)];
   }
-  function spinAndShow(msg) {
+  function spinAndDraw() {
     var machine = $('machine');
     machine.classList.add('spinning');
     setTimeout(function () {
       machine.classList.remove('spinning');
       lastResult = pick();
-      if (!lastResult) { toast(msg); return; }
+      if (!lastResult) { toast('没有符合条件的食物，请放宽偏好'); return; }
+      if (lastRelax > 0) toast('已放宽部分条件');
       showReceipt(lastResult);
     }, 900);
   }
-  function confirmDraw() { closeConfirm(); spinAndShow('没有符合条件的食物，请放宽偏好'); }
+  function attemptDraw() {
+    // 先按「全部条件」判断；无匹配则弹窗让用户决定，不静默放宽
+    if (!buildPool(0).pool.length) { $('relaxOverlay').classList.add('show'); return; }
+    spinAndDraw();
+  }
+  function confirmDraw() { closeConfirm(); attemptDraw(); }
   function excludeAndAgain() {
     if (lastResult) tempExclude[lastResult.id] = true;
     closeReceipt();
-    spinAndShow('没有符合条件的食物，请放宽忌口');
+    attemptDraw();
+  }
+  function closeRelax() { $('relaxOverlay').classList.remove('show'); }
+  function relaxAndDraw() { closeRelax(); spinAndDraw(); }
+  function backToEditFromRelax() {
+    closeRelax();
+    setTimeout(function () { $('prefOverlay').classList.add('show'); }, 120);
   }
   function showReceipt(f) {
     $('r-emoji').textContent = f.emoji;
@@ -483,6 +498,9 @@
     closeConfirm: function () { closeConfirm(); },
     backToEdit: function () { backToEdit(); },
     confirmDraw: function () { confirmDraw(); },
+    closeRelax: function () { closeRelax(); },
+    relaxAndDraw: function () { relaxAndDraw(); },
+    backToEditFromRelax: function () { backToEditFromRelax(); },
     excludeAndAgain: function () { excludeAndAgain(); },
     again: function () { again(); },
     closeReceipt: function () { closeReceipt(); },
